@@ -72,7 +72,7 @@ export const POST: RequestHandler = async ({ request, url, locals }) => {
     await fs.rename(partPath, lock.targetPath)
 
     activeUploads.delete(targetPathKey)
-    await cacheFiles(context)
+    //await cacheFiles(context)
 
     const domain = url.origin
     const allFiles = await getCachedFilesParsed(domain, context)
