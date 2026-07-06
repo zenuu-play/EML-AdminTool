@@ -249,6 +249,93 @@ export async function cacheFiles(dir: Dir): Promise<void> {
 }
 
 /**
+ * Upsert one file entry into a directory cache without rebuilding the whole cache tree.
+ * The cache is stored with `{{url}}` placeholders, while the returned file uses the provided domain.
+ * @param dir Directory where the file belongs.
+ * @param absoluteFilePath Absolute path to the file in the local filesystem.
+ * @param domain Domain to use for the returned URL.
+ */
+export async function upsertCachedFile(dir: Dir, absoluteFilePath: string, domain: string): Promise<File_> {
+  const slug = dir.startsWith('files-updater/') ? dir.split('/')[1] : undefined
+  const cacheKey = slug ? `files-updater-${slug}` : dir
+  const cachePath = sanitizePath('files', 'cache', `${cacheKey}.json`)
+  const baseDir = sanitizePath('files', dir)
+  const absoluteNormalizedPath = path_.resolve(absoluteFilePath)
+
+  if (!absoluteNormalizedPath.startsWith(baseDir)) {
+    throw new BusinessError('Invalid path', NotificationCode.INVALID_REQUEST, 400)
+  }
+
+  const relativePath = path_.relative(baseDir, absoluteNormalizedPath).replace(/\\/g, '/')
+  const fileName = path_.basename(relativePath)
+  const parentDir = path_.dirname(relativePath)
+  const normalizedParentDir = parentDir === '.' ? '' : `${parentDir}/`
+  const type = await getType(absoluteNormalizedPath)
+  const storedUrl = `{{url}}/files/${dir}/${relativePath}`
+
+  const storedFile: File_ = {
+    name: fileName,
+    path: normalizedParentDir,
+    url: storedUrl,
+    type
+  }
+
+  if (type !== 'FOLDER') {
+    const fileStat = await fs.stat(absoluteNormalizedPath)
+    storedFile.size = fileStat.size
+    storedFile.sha1 = await getFileSha1(absoluteNormalizedPath)
+  }
+
+  let cachedFiles: File_[] = []
+
+  try {
+    const cacheRaw = await fs.readFile(cachePath, 'utf-8')
+    cachedFiles = JSON.parse(cacheRaw) as File_[]
+  } catch {
+    // Cache can be missing/corrupted on fresh setup or after manual cleanup.
+    await cacheFiles(dir)
+    const cacheRaw = await fs.readFile(cachePath, 'utf-8')
+    cachedFiles = JSON.parse(cacheRaw) as File_[]
+  }
+
+  const pathSegments = relativePath.split('/')
+  if (pathSegments.length > 1) {
+    let currentDir = ''
+    for (const folderName of pathSegments.slice(0, -1)) {
+      const folderPath = currentDir === '' ? '' : `${currentDir}/`
+      const folderUrl = `{{url}}/files/${dir}/${currentDir ? `${currentDir}/` : ''}${folderName}`
+      const folderExists = cachedFiles.some((entry) => entry.type === 'FOLDER' && entry.name === folderName && entry.path === folderPath)
+
+      if (!folderExists) {
+        cachedFiles.push({
+          name: folderName,
+          path: folderPath,
+          url: folderUrl,
+          type: 'FOLDER'
+        })
+      }
+
+      currentDir = currentDir ? `${currentDir}/${folderName}` : folderName
+    }
+  }
+
+  const existingIndex = cachedFiles.findIndex((entry) => entry.name === storedFile.name && entry.path === storedFile.path)
+  if (existingIndex >= 0) {
+    cachedFiles[existingIndex] = storedFile
+  } else {
+    cachedFiles.push(storedFile)
+  }
+
+  await fs.mkdir(path_.dirname(cachePath), { recursive: true })
+  await fs.writeFile(cachePath, JSON.stringify(cachedFiles, null, 2))
+
+  return {
+    ...storedFile,
+    url: storedFile.url.replace('{{url}}', domain)
+  }
+}
+
+/**
  * Browse files in a directory and add them to the filesArray.
  * @param filesArray Array to store the files in.
  * @param dir Directory to browse.
