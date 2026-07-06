@@ -1,24 +1,16 @@
 # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-#               DEVELOPMENT ENVIRONMENT               #
+#          LOCAL PRODUCTION-LIKE ENVIRONMENT          #
 #                                                     #
-# This file is used to run the application in a       #
-# development environment.                            #
-# It enables hot-reloading of the application, and    #
-# gives an access to the database through phpMyAdmin. #
+# This file runs the application in production mode   #
+# while building the image locally from source code.  #
+# It is useful to validate a production-like setup    #
+# on a local machine before deployment.               #
 #                                                     #
-# To run the application in a production environment, #
-# you should use the docker-compose.prod.yml file     #
-# with an existing Docker image.                      #
-#                                                     #
-# Warning:                                            #
-#  - You may sometimes need to restart the container  #
-#    when you create a new file.                      #
-#  - You may need to delete and rebuild the "web"     #
-#    container and image when you install a new       #
-#    dependency or update dependencies.               #
+# This setup keeps local DB and pgAdmin access for    #
+# easier local testing and troubleshooting.            #
 # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
-name: eml-admintool-dev
+name: eml-admintool-local-prod
 
 networks:
   network:
@@ -27,28 +19,22 @@ services:
   web:
     build:
       context: ../
-      dockerfile: ./docker/Dockerfile.dev
+      dockerfile: ./docker/Dockerfile.build
     restart: unless-stopped
     networks:
       - network
+    env_file:
+      - path: .env
+        required: false
     environment:
-      NODE_ENV: 'development'
+      NODE_ENV: 'production'
+      BODY_SIZE_LIMIT: 'Infinity'
     volumes:
-      - ../.svelte-kit:/app/.svelte-kit
-      - ../static:/app/static
-      - ../node_modules/.prisma:/app/node_modules/.prisma
-      - ../prisma:/app/prisma
-      - ../src:/app/src
-      - ../env:/app/env
-      - ../LICENSE:/app/LICENSE
-      - ../package.json:/app/package.json
-      - ../svelte.config.js:/app/svelte.config.js
-      - ../tsconfig.json:/app/tsconfig.json
-      - ../vite.config.ts:/app/vite.config.ts
-      - ../files:/app/files
+      - files:/app/files
+      - env:/app/env
       - /var/run/docker.sock:/var/run/docker.sock
     ports:
-      - '5173:5173'
+      - '8080:3000'
     depends_on:
       - dbs
   dbs:
@@ -70,10 +56,13 @@ services:
     networks:
       - network
     environment:
-      - ENVIRONMENT=development
+      - ENVIRONMENT=production
       - PYTHONUNBUFFERED=1
     volumes:
-      - ../env:/app/env:ro
+      - ./docker-compose.dev.yml:/app/compose/docker-compose.prod.yml
+      - ./.env:/app/compose/.env:ro
+      - env:/app/env:ro
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       - web
     labels:
@@ -93,3 +82,5 @@ services:
 
 volumes:
   database:
+  files:
+  env:
